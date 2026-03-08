@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <title>Simple Watch Demo</title>
+    <style>
+        body { margin: 0; background: #000; overflow: hidden; }
+        #hint { position: fixed; left: 10px; top: 10px; color: #fff; font-family: sans-serif; }
+    </style>
+    <!-- Add these script tags before your module script -->
+    <script async src="https://unpkg.com/es-module-shims@1.6.3/dist/es-module-shims.js"></script>
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.151.3/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.151.3/examples/jsm/"
+            }
+        }
+    </script>
+</head>
+<body>
+    <div id="hint">Drag to rotate, scroll to zoom</div>
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+        // Renderer
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+        renderer.setClearColor(0x000000);
+        document.body.appendChild(renderer.domElement);
+
+        // Scene + Camera
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(45, innerWidth / innerHeight, 0.1, 100);
+        camera.position.set(0, 4, 6);
+        camera.lookAt(0, 0, 0);
+
+        // Controls
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.05;
+
+        // Lights
+        scene.add(new THREE.AmbientLight(0xffffff, 1.5));
+        const dir = new THREE.DirectionalLight(0xffffff, 2);
+        dir.position.set(5, 5, 5);
+        scene.add(dir);
+
+        // Scene setup - add background color
+        scene.background = new THREE.Color(0x222222); // lighter background
+
+        // Improve lighting
+        const ambientLight = new THREE.AmbientLight(0xffffff, 2); // brighter ambient
+        scene.add(ambientLight);
+
+        const dirLight = new THREE.DirectionalLight(0xffffff, 3); // brighter directional
+        dirLight.position.set(5, 5, 5);
+        scene.add(dirLight);
+
+        const backLight = new THREE.DirectionalLight(0xffffff, 2); // add back light
+        backLight.position.set(-5, 5, -5);
+        scene.add(backLight);
+
+        // Watch group
+        const watch = new THREE.Group();
+        scene.add(watch);
+
+        // Case
+        const caseMat = new THREE.MeshStandardMaterial({ 
+            color: 0x303030,    // Darker gray
+            metalness: 0.9,     // More metallic
+            roughness: 0.2      // More shiny
+        });
+        const caseGeom = new THREE.CylinderGeometry(2, 2, 0.6, 64);
+        const caseMesh = new THREE.Mesh(caseGeom, caseMat);
+        caseMesh.rotation.x = Math.PI / 2;
+        watch.add(caseMesh);
+
+        // Hour markers
+        const markMat = new THREE.MeshStandardMaterial({ 
+            color: 0xC0C0C0,   // Silver color for markers
+            metalness: 0.8,
+            roughness: 0.2
+        });
+        for (let i = 0; i < 12; i++) {
+            const marker = new THREE.Mesh(
+                new THREE.BoxGeometry(0.1, 0.1, 0.2),
+                markMat
+            );
+            const angle = (i / 12) * Math.PI * 2;
+            marker.position.x = Math.cos(angle) * 1.5;
+            marker.position.y = Math.sin(angle) * 1.5;
+            marker.position.z = 0.25;  // Adjusted Z position
+            marker.rotation.z = -angle;
+            watch.add(marker);
+        }
+
+        // Hands
+        function createHand(width, length, color) {
+            const hand = new THREE.Mesh(
+                new THREE.BoxGeometry(width, length, 0.04),
+                new THREE.MeshStandardMaterial({ color })
+            );
+            hand.geometry.translate(0, length/2, 0);
+            return hand;
+        }
+
+        const hourHand = createHand(0.1, 1, 0x000000);
+        const minuteHand = createHand(0.05, 1.4, 0x000000);
+        const secondHand = createHand(0.02, 1.6, 0xff0000);
+
+        hourHand.position.z = 0.3;     // Adjusted Z positions
+        minuteHand.position.z = 0.35;
+        secondHand.position.z = 0.4;
+
+        watch.add(hourHand, minuteHand, secondHand);
+
+        // Animation
+        function updateHands() {
+            const now = new Date();
+            const hours = now.getHours() % 12;
+            const minutes = now.getMinutes();
+            const seconds = now.getSeconds();
+            
+            hourHand.rotation.z = -(hours + minutes/60) * Math.PI / 6;
+            minuteHand.rotation.z = -minutes * Math.PI / 30;
+            secondHand.rotation.z = -seconds * Math.PI / 30;
+        }
+
+        // Render loop
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+            updateHands();
+            renderer.render(scene, camera);
+        }
+
+        // Start animation
+        animate();
+
+        // Handle window resize
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>

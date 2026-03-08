@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <title>Simple Watch Demo</title>
+    <style>
+        body { margin: 0; background: #000; overflow: hidden; }
+        #hint { position: fixed; left: 10px; top: 10px; color: #fff; font-family: sans-serif; }
+        #minimap { position: fixed; left: 10px; top: 40px; width: 180px; height: 180px; border-radius: 6px; border: 2px solid rgba(255,255,255,0.08); box-shadow: 0 2px 6px rgba(0,0,0,0.6); background: rgba(0,0,0,0.2); pointer-events: none; }
+    </style>
+    <!-- Add these script tags before your module script -->
+    <script async src="https://unpkg.com/es-module-shims@1.6.3/dist/es-module-shims.js"></script>
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.151.3/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.151.3/examples/jsm/"
+            }
+        }
+    </script>
+</head>
+<body>
+    <div id="hint">Drag to rotate, scroll to zoom — Football demo</div>
+    <div id="minimap"></div>
+    <div id="no-webgl" style="display:none; position:fixed; left:10px; top:40px; color:#f66; font-family:sans-serif;">WebGL not supported in this browser.</div>
+    <script type="module" src="./Ball.js"></script>
+</body>
+
+</html>

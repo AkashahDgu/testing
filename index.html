@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Simple Three.js Third-Person Demo (With Collision)</title>
+  <style>
+    html, body { height: 100%; margin: 0; }
+    canvas { display: block; }
+    #overlay {
+      position: absolute; top: 10px; left: 10px; color: #111;
+      background: rgba(255,255,255,0.8); padding: 8px 10px; border-radius: 6px;
+      font-family: sans-serif; font-size: 13px;
+    }
+  </style>
+</head>
+<body>
+  <div id="overlay">WASD to move • Shift to sprint • Space to jump • Use Live Server</div>
+  <div id="hint" style="display:none; position:absolute; bottom:20px; left:50%; transform:translateX(-50%);
+               background: rgba(0,0,0,0.75); color: #fff; padding: 8px 12px; border-radius:6px; font-family: sans-serif;">
+    Press F for Info
+  </div>
+  <div id="debug" style="position:absolute; right:10px; top:10px; color:#111; background:rgba(255,255,255,0.85); padding:8px; border-radius:6px; font-family:sans-serif; font-size:12px; max-width:260px">
+    Debug: initializing...
+  </div>
+
+  <script type="module">
+    import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.152.2/build/three.module.js';
+
+    // --- SETUP ---
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0xa0a0a0);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setClearColor(0xa0a0a0);
+    renderer.shadowMap.enabled = true;
+    document.body.appendChild(renderer.domElement);
+
+    const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+
+    // --- LIGHTS ---
+    const hemi = new THREE.HemisphereLight(0xffffff, 0x444444, 0.8);
+    hemi.position.set(0, 50, 0);
+    scene.add(hemi);
+
+    const dir = new THREE.DirectionalLight(0xffffff, 0.6);
+    dir.position.set(5, 10, 7);
+    dir.castShadow = true;
+    scene.add(dir);
+
+    // --- OBJECTS ---
+    
+    // Floor
+    const floorGeo = new THREE.PlaneGeometry(200, 200);
+    const floorMat = new THREE.MeshStandardMaterial({ color: 0x2e8b57 });
+    const floor = new THREE.Mesh(floorGeo, floorMat);
+    floor.rotation.x = -Math.PI / 2;
+    floor.receiveShadow = true;
+    scene.add(floor);
+
+    // Player
+    const playerHeight = 1.8;
+    const playerGeo = new THREE.BoxGeometry(1, playerHeight, 1);
+    const playerMat = new THREE.MeshStandardMaterial({ color: 0x1e90ff });
+    const player = new THREE.Mesh(playerGeo, playerMat);
+    player.castShadow = false;
+    player.position.y = playerHeight / 2;
+    scene.add(player);
+
+    // Grid
+    const grid = new THREE.GridHelper(200, 40, 0x000000, 0x000000);
+    grid.material.opacity = 0.12;
+    grid.material.transparent = true;
+    scene.add(grid);
+
+    // Building
+    const buildingWidth = 4;
+    const buildingHeight = 3.5;
+    const buildingDepth = 6;
+    const buildingGeo = new THREE.BoxGeometry(buildingWidth, buildingHeight, buildingDepth);
+    const buildingMat = new THREE.MeshStandardMaterial({ color: 0x8B4513 });
+    const building = new THREE.Mesh(buildingGeo, buildingMat);
+    building.position.set(8, buildingHeight / 2, -6);
+    building.receiveShadow = true;
+    scene.add(building);
+
+    // --- COLLISION SETUP (New) ---
+    // We create reusable boxes to calculate physics
+    const playerBox = new THREE.Box3();
+    const buildingBox = new THREE.Box3();
+
+    // --- CONTROLS ---
+    const keys = { w: false, a: false, s: false, d: false, shift: false, jump: false, interact: false };
+
+    window.addEventListener('keydown', (f) => {
+      const k = (f.key || '').toLowerCase();
+      const code = (f.code || '').toLowerCase();
+      if (k === 'w') keys.w = true;
+      if (k === 'a') keys.a = true;
+      if (k === 's') keys.s = true;
+      if (k === 'd') keys.d = true;
+      if (k === 'shift' || code === 'shiftleft') keys.shift = true;
+      if (k === ' ' || code === 'space') keys.jump = true;
+      if (k === 'f' || code === 'keyf') keys.interact = true;
+    });
+    window.addEventListener('keyup', (f) => {
+      const k = (f.key || '').toLowerCase();
+      const code = (f.code || '').toLowerCase();
+      if (k === 'w') keys.w = false;
+      if (k === 'a') keys.a = false;
+      if (k === 's') keys.s = false;
+      if (k === 'd') keys.d = false;
+      if (k === 'shift' || code === 'shiftleft') keys.shift = false;
+      if (k === ' ' || code === 'space') keys.jump = false;
+      if (k === 'f' || code === 'keyf') keys.interact = false;
+    });
+
+    const clock = new THREE.Clock();
+    const speed = 6; 
+
+    // Camera setup
+    camera.position.set(0, 2.2, 6);
+    camera.rotation.x = -0.25;
+    player.add(camera);
+
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    // Physics vars
+    let velocityY = 0;
+    const gravity = 30.0;
+    const jumpSpeed = 8.0;
+
+    function animate() {
+      const delta = clock.getDelta();
+
+      // 1. SAVE OLD POSITION
+      // We save where the player was *before* moving this frame
+      const oldPosition = player.position.clone();
+
+      // 2. APPLY MOVEMENT
+      const sprintMultiplier = keys.shift ? 1.8 : 1.0;
+      const moveSpeed = speed * sprintMultiplier;
+      const turnSpeed = 2.5;
+
+      if (keys.w) player.translateZ(-moveSpeed * delta);
+      if (keys.s) player.translateZ(moveSpeed * delta);
+      if (keys.a) player.rotateY(turnSpeed * delta);
+      if (keys.d) player.rotateY(-turnSpeed * delta);
+
+      // 3. COLLISION CHECK
+      // Update the invisible boxes to match current positions
+      playerBox.setFromObject(player);
+      buildingBox.setFromObject(building);
+
+      // If they intersect, it means we walked into the wall
+      if (playerBox.intersectsBox(buildingBox)) {
+          // Revert the player to the old position
+          player.position.copy(oldPosition);
+      }
+
+      // 4. VERTICAL MOVEMENT (Gravity/Jump)
+      // (We do this after wall collision so you can still jump while touching a wall)
+      const onGround = player.position.y <= playerHeight / 2 + 0.0001;
+      
+      if (keys.jump && onGround) {
+        velocityY = jumpSpeed;
+        keys.jump = false;
+      }
+
+      velocityY -= gravity * delta;
+      player.position.y += velocityY * delta;
+
+      if (player.position.y < playerHeight / 2) {
+        player.position.y = playerHeight / 2;
+        velocityY = 0;
+      }
+
+      // --- UI UPDATES ---
+      const hintEl = document.getElementById('hint');
+      const interactDistance = 3.0;
+      const distToBuilding = player.position.distanceTo(building.position);
+      
+      if (distToBuilding <= interactDistance) {
+        hintEl.style.display = 'block';
+        hintEl.innerText = 'Press F for Info';
+        if (keys.interact) {
+          keys.interact = false;
+          hintEl.innerText = `Building Info:\nType: Demo House\nSize: ${buildingWidth} x ${buildingHeight}`;
+          setTimeout(() => {
+             if (player.position.distanceTo(building.position) <= interactDistance) {
+               hintEl.innerText = 'Press F for Info';
+             } else {
+               hintEl.style.display = 'none';
+             }
+          }, 2500);
+        }
+      } else {
+        hintEl.style.display = 'none';
+      }
+
+      renderer.render(scene, camera);
+      
+      // Debug
+      const dbg = document.getElementById('debug');
+      if (dbg) {
+        dbg.innerText = `Pos: ${player.position.x.toFixed(1)}, ${player.position.z.toFixed(1)}`;
+      }
+      
+      requestAnimationFrame(animate);
+    }
+
+    animate();
+    
+    // Click to focus
+    renderer.domElement.setAttribute('tabindex', '0');
+    renderer.domElement.addEventListener('click', () => renderer.domElement.focus());
+
+  </script>
+</body>
+</html>

@@ -1,0 +1,305 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Gym Demo (FPS + Interaction)</title>
+  <style>
+    html, body { height: 100%; margin: 0; overflow: hidden; font-family: 'Segoe UI', sans-serif; }
+    canvas { display: block; }
+    
+    /* Instructions Overlay */
+    #overlay {
+      position: absolute; top: 20px; left: 20px; color: #fff;
+      background: rgba(0, 0, 0, 0.6); 
+      backdrop-filter: blur(5px);
+      padding: 15px 20px; border-radius: 12px;
+      font-size: 14px; pointer-events: none;
+      user-select: none; z-index: 1;
+      border: 1px solid rgba(255,255,255,0.1);
+      box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+    }
+
+    /* "Press F" Prompt */
+    #interact-prompt {
+      position: absolute; top: 60%; left: 50%; transform: translate(-50%, -50%);
+      color: white; font-size: 18px; font-weight: 600;
+      background: rgba(0,0,0,0.7); padding: 8px 16px; border-radius: 20px;
+      backdrop-filter: blur(2px);
+      pointer-events: none; display: none; z-index: 2;
+    }
+
+    /* The Popup Modal Background */
+    #modal {
+      display: none;
+      position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+      background: rgba(0, 0, 0, 0.6); /* Dimmed background */
+      backdrop-filter: blur(4px); /* Blur the game behind it */
+      z-index: 10;
+      justify-content: center; align-items: center;
+    }
+
+    /* The Window Itself */
+    #modal-content {
+      width: 85%; height: 85%; 
+      background: #000; 
+      position: relative;
+      border-radius: 16px; /* Smooth corners */
+      box-shadow: 0 20px 50px rgba(0,0,0,0.5); /* Deep shadow */
+      overflow: hidden;
+      border: 1px solid rgba(255,255,255,0.1);
+    }
+
+    /* The Modern Close Button */
+    #close-btn {
+      position: absolute; top: 20px; right: 20px;
+      width: 40px; height: 40px;
+      background: rgba(0, 0, 0, 0.6);
+      color: white; border: 1px solid rgba(255,255,255,0.3);
+      border-radius: 50%; /* Make it a circle */
+      cursor: pointer; font-weight: bold; z-index: 20;
+      display: flex; justify-content: center; align-items: center;
+      transition: all 0.2s ease;
+      font-size: 16px;
+    }
+
+    #close-btn:hover {
+      background: #ff4757; /* Red on hover */
+      border-color: #ff4757;
+      transform: scale(1.1);
+    }
+
+    iframe { width: 100%; height: 100%; border: none; }
+  </style>
+</head>
+<body>
+
+  <div id="overlay">
+    <b style="font-size:16px;">Controls</b><br/><br/>
+    Click to Start<br/>
+    <b>WASD</b> Move<br/>
+    <b>Shift</b> Sprint<br/>
+    <b>F</b> Interact
+  </div>
+
+  <div id="interact-prompt">[F] Inspect Area</div>
+
+  <div id="modal">
+    <div id="modal-content">
+      <button id="close-btn" title="Close Window">✕</button>
+      <iframe src="360.html"></iframe> 
+    </div>
+  </div>
+
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.152.2/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.152.2/examples/jsm/"
+      }
+    }
+  </script>
+
+  <script type="module">
+    import * as THREE from 'three';
+    import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+    import { Octree } from 'three/addons/math/Octree.js';
+    import { Capsule } from 'three/addons/math/Capsule.js';
+
+    // --- SETUP ---
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x87CEEB); 
+    scene.fog = new THREE.Fog(0x87CEEB, 10, 60);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.shadowMap.enabled = true;
+    document.body.appendChild(renderer.domElement);
+
+    const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+
+    // --- LIGHTS ---
+    const ambient = new THREE.AmbientLight(0xffffff, 0.6); 
+    scene.add(ambient);
+
+    const dir = new THREE.DirectionalLight(0xffffff, 1.2);
+    dir.position.set(5, 20, 7);
+    dir.castShadow = true;
+    scene.add(dir);
+
+    // --- OBJECTS ---
+    const floorGeo = new THREE.PlaneGeometry(200, 200);
+    const floorMat = new THREE.MeshStandardMaterial({ color: 0x2e8b57 });
+    const floor = new THREE.Mesh(floorGeo, floorMat);
+    floor.rotation.x = -Math.PI / 2;
+    floor.receiveShadow = true;
+    scene.add(floor);
+
+    // Player Wrapper
+    const playerHeight = 1.7;
+    const playerRadius = 0.4;
+    const player = new THREE.Object3D(); 
+    player.position.y = playerHeight / 2;
+    scene.add(player);
+    camera.position.set(0, 0.8, 0); 
+    player.add(camera);
+
+    // Physics
+    const worldOctree = new Octree();
+    const playerCollider = new Capsule(
+      new THREE.Vector3(0, playerRadius, 0),
+      new THREE.Vector3(0, playerHeight - playerRadius, 0),
+      playerRadius
+    );
+
+    // Interaction
+    const raycaster = new THREE.Raycaster();
+    let interactableObjects = []; 
+    let canInteract = false;
+
+    // --- LOAD GYM ---
+    const loader = new GLTFLoader();
+    loader.load('Gym.glb', (gltf) => {
+      const model = gltf.scene;
+      model.position.set(5, 0, 0); 
+      model.scale.set(0.1, 0.1, 0.1);
+      
+      model.traverse((child) => {
+        if (child.isMesh) {
+          child.castShadow = true;
+          child.receiveShadow = true;
+          interactableObjects.push(child);
+        }
+      });
+      scene.add(model);
+      worldOctree.fromGraphNode(model);
+    });
+
+    // --- CONTROLS ---
+    const keys = { w: false, a: false, s: false, d: false, shift: false, jump: false };
+    const clock = new THREE.Clock();
+    
+    const walkSpeed = 5;
+    const runSpeed = 9;
+    let velocityY = 0;
+    const gravity = 30.0;
+    const jumpForce = 10.0;
+    let isModalOpen = false;
+
+    document.body.addEventListener('click', () => {
+      if (!isModalOpen) document.body.requestPointerLock();
+    });
+
+    document.addEventListener('mousemove', (event) => {
+      if (document.pointerLockElement === document.body && !isModalOpen) {
+        player.rotation.y -= event.movementX * 0.002;
+        camera.rotation.x -= event.movementY * 0.002;
+        camera.rotation.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, camera.rotation.x));
+      }
+    });
+
+    window.addEventListener('keydown', (e) => {
+      const k = e.key.toLowerCase();
+      
+      if (k === 'f' && canInteract) openModal();
+      if (k === 'w') keys.w = true;
+      if (k === 'a') keys.a = true;
+      if (k === 's') keys.s = true;
+      if (k === 'd') keys.d = true;
+      if (k === 'shift') keys.shift = true;
+      if (k === ' ') keys.jump = true;
+    });
+
+    window.addEventListener('keyup', (e) => {
+      const k = e.key.toLowerCase();
+      if (k === 'w') keys.w = false;
+      if (k === 'a') keys.a = false;
+      if (k === 's') keys.s = false;
+      if (k === 'd') keys.d = false;
+      if (k === 'shift') keys.shift = false;
+      if (k === ' ') keys.jump = false;
+    });
+
+    // --- UI LOGIC ---
+    const modal = document.getElementById('modal');
+    const prompt = document.getElementById('interact-prompt');
+    const closeBtn = document.getElementById('close-btn');
+
+    function openModal() {
+      isModalOpen = true;
+      document.exitPointerLock(); 
+      modal.style.display = 'flex';
+    }
+
+    closeBtn.addEventListener('click', () => {
+      isModalOpen = false;
+      modal.style.display = 'none';
+      document.body.requestPointerLock();
+    });
+
+    // --- ANIMATION LOOP ---
+    function animate() {
+      requestAnimationFrame(animate);
+
+      if (isModalOpen) return;
+
+      const delta = Math.min(0.05, clock.getDelta());
+
+      // Raycast
+      raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
+      const intersects = raycaster.intersectObjects(interactableObjects);
+      
+      if (intersects.length > 0 && intersects[0].distance < 5) {
+        canInteract = true;
+        prompt.style.display = 'block';
+      } else {
+        canInteract = false;
+        prompt.style.display = 'none';
+      }
+
+      // Movement
+      const speed = keys.shift ? runSpeed : walkSpeed;
+      if (keys.w) player.translateZ(-speed * delta);
+      if (keys.s) player.translateZ(speed * delta);
+      if (keys.a) player.translateX(-speed * delta);
+      if (keys.d) player.translateX(speed * delta);
+
+      // Gravity
+      const onGround = player.position.y <= playerHeight / 2 + 0.0001;
+      if (keys.jump && onGround) {
+        velocityY = jumpForce;
+        keys.jump = false;
+      }
+      velocityY -= gravity * delta;
+      player.position.y += velocityY * delta;
+
+      if (player.position.y < playerHeight / 2) {
+        player.position.y = playerHeight / 2;
+        velocityY = 0;
+      }
+
+      // Collision
+      playerCollider.start.copy(player.position);
+      playerCollider.end.copy(player.position);
+      playerCollider.start.y -= (playerHeight / 2 - playerRadius);
+      playerCollider.end.y += (playerHeight / 2 - playerRadius);
+
+      const result = worldOctree.capsuleIntersect(playerCollider);
+      if (result) {
+        player.position.addScaledVector(result.normal, result.depth);
+        if (result.normal.y > 0) velocityY = 0;
+      }
+
+      renderer.render(scene, camera);
+    }
+
+    animate();
+
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+  </script>
+</body>
+</html>

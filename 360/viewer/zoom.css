@@ -1,0 +1,8 @@
+.zoom-controls{position:fixed;right:12px;bottom:12px;background:rgba(0,0,0,0.6);color:#fff;padding:10px;border-radius:8px;font-family:sans-serif;z-index:1001;display:flex;gap:8px;align-items:center}
+.zoom-controls button{background:#222;border:1px solid #444;color:#fff;padding:6px 8px;border-radius:4px;cursor:pointer}
+.zoom-controls input[type=range]{width:140px}
+.zoom-label{min-width:36px;text-align:center}
+#fullscreen-btn{position:fixed;top:12px;right:12px;background:#222;border:1px solid #444;color:#fff;padding:6px 10px;border-radius:6px;z-index:1002;cursor:pointer}
+@media (max-width:480px){
+  .zoom-controls{left:12px;right:auto;}
+}
